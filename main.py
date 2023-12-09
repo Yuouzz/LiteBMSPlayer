@@ -6,19 +6,13 @@ import re
 import random
 import cv2
 
-TIME_BAD = 0.2
-TIME_GOOD = 0.06
-TIME_PERFECT = 0.03
 WINDOW_WIDTH = 600
-WINDOW_LENGTH = 800
+
 FLOW_SPEED = 600
 NOTE_COLOR = {0: 'black', 1: 'red', 2: 'white', 3: 'blue', 4: 'white', 5: 'blue', 6: 'white', 7: 'blue', 8: 'white',
-              9: 'red', 10: 'white', 11: 'blue', 12: 'white', 13: 'blue', 14: 'white', 15: 'blue', 16: 'white'}
+              10: 'white', 11: 'blue', 12: 'white', 13: 'blue', 14: 'white', 15: 'blue', 16: 'white', 17: 'red'}
 BLANK_IMAGE = pygame.Surface((200, 200))
 BLANK_IMAGE.fill("black")
-pygame.mixer.init()
-pygame.mixer.set_num_channels(200)
-pygame.init()
 
 
 class bar_event:
@@ -52,10 +46,12 @@ class bar_event:
         _time = self.time - _press_time
         self.lag_time = _time
 
-    def display(self):
+    def display(self, _dp=False):
         y = 600 - self.lag_time * FLOW_SPEED + 1
         if 0 < y < WINDOW_WIDTH:
             screen.blit(self.block, (0, y))
+            if _dp:
+                screen.blit(self.block, (400, y))
 
 
 class sound:
@@ -116,25 +112,12 @@ class note(sound):
         self.block.fill(color=NOTE_COLOR[track])
         self.track = track
 
-    # def judge(self, _press_time):
-    #     self.get_lag_time(_press_time)
-    #     self.play_sound()
-    #     if self.lag_time < TIME_BAD:
-    #         if self.lag_time < TIME_GOOD:
-    #             if self.lag_time < TIME_PERFECT:
-    #                 return "Perfect"
-    #             else:
-    #                 return "Good"
-    #         else:
-    #             return "Bad"
-    #     else:
-    #         return "Miss"
-
     def display(self):
-        x = 40 * int(self.track)
-        y = 600 - self.lag_time * FLOW_SPEED - 10
-        if -10 < y < WINDOW_WIDTH:
-            screen.blit(self.block, (x, y))
+        if not self.played:
+            x = 40 * int(self.track)
+            y = 600 - self.lag_time * FLOW_SPEED - 10
+            if -10 < y < WINDOW_WIDTH:
+                screen.blit(self.block, (x, y))
 
     def auto_play(self):
         self.play_sound()
@@ -158,10 +141,11 @@ class hold(note):
         self.block.fill(color=NOTE_COLOR[self.track])
 
     def display(self):
-        x = 40 * int(self.track)
-        y = 600 - self.lag_time * FLOW_SPEED - self.keep_time * FLOW_SPEED
-        if - self.keep_time * FLOW_SPEED < y < WINDOW_WIDTH:
-            screen.blit(self.block, (x, y))
+        if not self.played:
+            x = 40 * int(self.track)
+            y = 600 - self.lag_time * FLOW_SPEED - self.keep_time * FLOW_SPEED
+            if - self.keep_time * FLOW_SPEED < y < WINDOW_WIDTH:
+                screen.blit(self.block, (x, y))
 
 
 class bg:
@@ -173,7 +157,7 @@ class bg:
     lag_time = 0.0
     next_time = 0.0
     raw_img = None
-    img = None
+    img = BLANK_IMAGE
 
     def __init__(self, bg_file, start_bar):
         self.file = bg_file
@@ -181,9 +165,10 @@ class bg:
         if self.file:
             if not os.path.exists(self.file):
                 self.played = True
-            if re.search('.jpg|.png|.jpeg|.bmp|.gif', self.file):
+            if re.search('.jpg|.png|.jpeg|.bmp|.gif|.webp', self.file):
                 self.img = pygame.image.load(self.file)
-            elif re.search('.mpg|.mp4|.wmv|.avi|.mkv', self.file):
+                self.img = pygame.transform.scale(self.img, (400, 400))
+            elif re.search('.mpg|.mp4|.wmv|.avi|.mkv|.mov|.flv', self.file):
                 self.video = True
                 self.cap = cv2.VideoCapture(self.file)
                 self.all_frames = self.cap.get(7)
@@ -192,13 +177,15 @@ class bg:
 
     def get_time(self, last_bar):
         self.start_time = last_bar.get_time(self.start_bar)
+        self.next_time = self.start_time
 
     def play(self, press_time=0.0):
         if self.video:
             if press_time > self.next_time and self.played_frames < self.all_frames:
                 _success, self.raw_img = self.cap.read()
                 self.raw_img = cv2.resize(self.raw_img, (400, 400), interpolation=cv2.INTER_LINEAR)
-                self.next_time = press_time + self.interval_time
+                self.next_time += self.interval_time
+                self.played_frames += 1
                 if _success:
                     self.img = pygame.image.frombuffer(self.raw_img.tobytes(), self.raw_img.shape[1::-1], "BGR")
                     return self.img
@@ -231,6 +218,7 @@ class BMSparser:
     def __init__(self, file):
 
         TRACK_DICT = {'6': 1, '1': 2, '2': 3, '3': 4, '4': 5, '5': 6, '8': 7, '9': 8}
+        TRACK_DICT_DP = {'6': 17, '1': 10, '2': 11, '3': 12, '4': 13, '5': 14, '8': 15, '9': 16}
 
         self.file = file
         self.path = str(file).rsplit(sep="\\", maxsplit=1)[0] + "\\"
@@ -260,7 +248,7 @@ class BMSparser:
 
         for line in file_lines:
             line = line.removesuffix("\n")
-            if re.match('#', line) and (if_state == False or if_num == random_num):
+            if re.match('#', line) and (if_state is False or if_num == random_num):
                 if re.match('#WAV', line):
                     place = line[4:6]
                     sound_define[place] = line[7:]
@@ -272,7 +260,7 @@ class BMSparser:
                 elif re.match(r'#\d', line):
                     channel = int(line[1:4])
                     if channel > max_bar:
-                        max_bar = channel + 1
+                        max_bar = channel
                     message = line[7:]
                     length = len(message) // 2
                     if line[4] == "0":
@@ -310,7 +298,7 @@ class BMSparser:
                         if line[4] == "1":
                             track = TRACK_DICT[line[5]]
                         if line[4] == "2":
-                            track = TRACK_DICT[line[5]] + 8
+                            track = TRACK_DICT_DP[line[5]]
                         for _i in range(length):
                             key = message[int(_i * 2): int(_i * 2 + 2)]
                             if key != "00" and key in sound_define:
@@ -323,7 +311,7 @@ class BMSparser:
                         if line[4] == "5":
                             track = TRACK_DICT[line[5]]
                         if line[4] == "6":
-                            track = TRACK_DICT[line[5]] + 8
+                            track = TRACK_DICT_DP[line[5]]
                         for _i in range(length):
                             key = message[int(_i * 2): int(_i * 2 + 2)]
                             if key != "00":
@@ -385,7 +373,7 @@ class BMSparser:
                     if_state = False
         _f.close()
 
-        for _i in range(max_bar):
+        for _i in range(max_bar + 1):
             if _i not in bars:
                 bars[_i] = bar_event(_i)
             if not bars[_i].bpm:
@@ -425,14 +413,33 @@ def try_get(dic, item):
         return " "
 
 
+WINDOW_LENGTH = 800
+bg_available = False
+print("LiteBMxPlayer v0.1(Github:)\nPlease print BMS file path:")
 path = input()
 BMS = BMSparser(path)
+current_bg = None
+anime = BLANK_IMAGE
+dp = False
+text_x = 400
+print(BMS.info['player'])
+if BMS.info['player'] == "3" or BMS.info['player'] == "2":
+    dp = True
+    text_x = 760
+    WINDOW_LENGTH = 1200
+choice = input()
+if choice.upper() == "Y":
+    bg_available = True
+pygame.mixer.init()
+pygame.mixer.set_num_channels(150)
+pygame.init()
 screen = pygame.display.set_mode((WINDOW_LENGTH, WINDOW_WIDTH))
+pygame.display.set_caption("LiteBMxPlayer v0.1")
 screen.fill(color='black')
 full_combo = BMS.total_notes() + BMS.total_holds() * 2
 combo = 0
-f = pygame.font.SysFont(['Consolas'], 15)
-title = f.render(try_get(BMS.info, 'title'), True, 'white')
+f = pygame.font.SysFont(['Consolas'], 16)
+title = f.render(try_get(BMS.info, 'title') + " " + try_get(BMS.info, 'sub_title'), True, 'white')
 artist = f.render(try_get(BMS.info, 'artist'), True, 'white')
 sub_artist = f.render(try_get(BMS.info, 'sub_artist'), True, 'white')
 
@@ -441,17 +448,19 @@ vertical_line.fill(color='#202020')
 pygame.display.flip()
 
 zero_time = time.perf_counter()
-bg_available = False
-current_bg = None
-anime = BLANK_IMAGE
+
+pygame.display.flip()
 while True:
     screen.fill(color='black')
     current_time = time.perf_counter() - zero_time
     for i in range(1, 10):
         screen.blit(vertical_line, (i * 40, 0))
+    if dp:
+        for i in range(10, 18):
+            screen.blit(vertical_line, (i * 40, 0))
     for i in BMS.all_bars:
         i.get_lag_time(current_time)
-        i.display()
+        i.display(dp)
     for i in BMS.sounds:
         i.get_lag_time(current_time)
         if i.lag_time < 0.0001 and not i.played and i.playable:
@@ -477,15 +486,15 @@ while True:
 
         if current_bg and current_bg.video:
             anime = current_bg.play(current_time)
-        screen.blit(anime, (400, 120))
+        screen.blit(anime, (text_x, 160))
     combo_text = f.render("Combo:" + str(combo) + "/" + str(full_combo), True, 'white')
-    screen.blit(combo_text, (400, 20))
+    screen.blit(combo_text, (text_x, 20))
     time_text = f.render("Time:" + str(int(current_time)), True, 'white')
-    screen.blit(time_text, (400, 40))
-    screen.blit(title, (400, 60))
-    screen.blit(artist, (400, 80))
-    screen.blit(sub_artist, (400, 100))
-    screen.blit(anime, (400, 120))
+    screen.blit(time_text, (text_x, 40))
+    screen.blit(title, (text_x, 60))
+    screen.blit(artist, (text_x, 80))
+    screen.blit(sub_artist, (text_x, 100))
+    screen.blit(anime, (text_x, 120))
     pygame.display.flip()
     pygame.display.update()
     for event in pygame.event.get():
