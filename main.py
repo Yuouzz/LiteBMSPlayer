@@ -427,6 +427,7 @@ if BMS.info['player'] == "3" or BMS.info['player'] == "2":
     dp = True
     text_x = 760
     WINDOW_LENGTH = 1200
+print("Enable BG?(Y/N)") 
 choice = input()
 if choice.upper() == "Y":
     bg_available = True
