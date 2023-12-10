@@ -432,6 +432,7 @@ print("Enable BG?(Y/N)")
 choice = input()
 if choice.upper() == "Y":
     bg_available = True
+print("Press \'Esc\' to close the player.")  
 pygame.display.set_caption("LiteBMxPlayer v0.1")
 screen = pygame.display.set_mode((WINDOW_LENGTH, WINDOW_WIDTH))
 screen.fill(color='black')
