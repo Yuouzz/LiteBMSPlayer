@@ -11,6 +11,7 @@ WINDOW_WIDTH = 600
 FLOW_SPEED = 600
 NOTE_COLOR = {0: 'black', 1: 'red', 2: 'white', 3: 'blue', 4: 'white', 5: 'blue', 6: 'white', 7: 'blue', 8: 'white',
               10: 'white', 11: 'blue', 12: 'white', 13: 'blue', 14: 'white', 15: 'blue', 16: 'white', 17: 'red'}
+
 BLANK_IMAGE = pygame.Surface((200, 200))
 BLANK_IMAGE.fill("black")
 
@@ -141,11 +142,10 @@ class hold(note):
         self.block.fill(color=NOTE_COLOR[self.track])
 
     def display(self):
-        if not self.played:
-            x = 40 * int(self.track)
-            y = 600 - self.lag_time * FLOW_SPEED - self.keep_time * FLOW_SPEED
-            if - self.keep_time * FLOW_SPEED < y < WINDOW_WIDTH:
-                screen.blit(self.block, (x, y))
+        x = 40 * int(self.track)
+        y = 600 - self.lag_time * FLOW_SPEED - self.keep_time * FLOW_SPEED
+        if - self.keep_time * FLOW_SPEED < y < WINDOW_WIDTH:
+            screen.blit(self.block, (x, y))
 
 
 class bg:
@@ -274,6 +274,7 @@ class BMSparser:
                                     start_bar = int(channel) + _i / length
                                     instance = sound(start_bar, sound_file)
                                     self.sounds.append(instance)
+                                # Get background sounds
                         elif line[5] == "2":
                             if channel not in bars:
                                 bars[channel] = bar_event(int(channel), 0, float(line[7:]))
@@ -284,6 +285,7 @@ class BMSparser:
                                 bars[channel] = bar_event(int(channel), int(line[7:], 16), 1.0)
                             else:
                                 bars[channel].bpm = int(line[7:], 16)
+                                # Get all BPM and beat variations.
                         elif line[5] == "4":
                             for _i in range(length):
                                 key = message[int(_i * 2): int(_i * 2 + 2)]
@@ -293,6 +295,7 @@ class BMSparser:
                                         bg_file = self.path + bg_define[key]
                                     start_bar = int(channel) + _i / length
                                     self.bgs.append(bg(bg_file, start_bar))
+                                # Get the start time of BGA or BGI.
                     elif line[4] == "1" or line[4] == "2":
                         track = 0
                         if line[4] == "1":
@@ -306,6 +309,7 @@ class BMSparser:
                                 start_bar = int(channel) + _i / length
                                 instance = note(start_bar, sound_file, track)
                                 self.notes.append(instance)
+                                # Get all notes.
                     elif line[4] == "5" or line[4] == "6":
                         track = 0
                         if line[4] == "5":
@@ -324,6 +328,7 @@ class BMSparser:
                                     hold_start_bar[track] = int(channel) + _i / length
                                     hold_sound[track] = self.path + sound_define[key]
                                     hold_started[track] = True
+                                    # Get all holds.
                 elif re.match('#IF', line):
                     if_num = int(line[4:])
                     if_state = True
@@ -367,12 +372,10 @@ class BMSparser:
                     self.info['back_bmp'] = line[9:]
                 elif re.match('#DIFFICULTY', line):
                     self.info['difficulty'] = line[12:]
-
             else:
                 if re.match('#ENDIF', line):
                     if_state = False
         _f.close()
-
         for _i in range(max_bar + 1):
             if _i not in bars:
                 bars[_i] = bar_event(_i)
@@ -392,7 +395,7 @@ class BMSparser:
             _i.get_end_time(bars[int(_i.end_bar)])
         for _i in self.bgs:
             _i.get_time(bars[int(_i.start_bar)])
-
+        
     def total_notes(self):
         num = len(self.notes)
         return num
@@ -413,55 +416,51 @@ def try_get(dic, item):
         return " "
 
 
-WINDOW_LENGTH = 800
-bg_available = False
-print("LiteBMxPlayer v0.1(Github:)\nPlease print BMS file path:")
+pygame.init()
+print("LiteBMxPlayer v0.1(github.com/Yuouzz/LiteBMxPlayer)\nPlease print BMS file path:")
 path = input()
 BMS = BMSparser(path)
-current_bg = None
-anime = BLANK_IMAGE
-dp = False
+DP = False
 text_x = 400
-print(BMS.info['player'])
-if BMS.info['player'] == "3" or BMS.info['player'] == "2":
-    dp = True
+WINDOW_LENGTH = 800
+if BMS.info['player'] == "3":
+    DP = True
     text_x = 760
     WINDOW_LENGTH = 1200
-print("Enable BG?(Y/N)") 
+bg_available = False
+print("Enable BG?(Y/N)")
 choice = input()
 if choice.upper() == "Y":
     bg_available = True
-pygame.mixer.init()
-pygame.mixer.set_num_channels(150)
-pygame.init()
-screen = pygame.display.set_mode((WINDOW_LENGTH, WINDOW_WIDTH))
 pygame.display.set_caption("LiteBMxPlayer v0.1")
+screen = pygame.display.set_mode((WINDOW_LENGTH, WINDOW_WIDTH))
 screen.fill(color='black')
 full_combo = BMS.total_notes() + BMS.total_holds() * 2
 combo = 0
-f = pygame.font.SysFont(['Consolas'], 16)
+f = pygame.font.SysFont(['Consolas'], 15)
 title = f.render(try_get(BMS.info, 'title') + " " + try_get(BMS.info, 'sub_title'), True, 'white')
 artist = f.render(try_get(BMS.info, 'artist'), True, 'white')
 sub_artist = f.render(try_get(BMS.info, 'sub_artist'), True, 'white')
-
+# Get general information of BMS. 
 vertical_line = pygame.Surface((1, 600))
 vertical_line.fill(color='#202020')
+current_bg = None
+current_image = BLANK_IMAGE
+pygame.mixer.init()
+pygame.mixer.set_num_channels(150)
 pygame.display.flip()
-
 zero_time = time.perf_counter()
-
-pygame.display.flip()
 while True:
     screen.fill(color='black')
     current_time = time.perf_counter() - zero_time
     for i in range(1, 10):
         screen.blit(vertical_line, (i * 40, 0))
-    if dp:
+    if DP:
         for i in range(10, 18):
             screen.blit(vertical_line, (i * 40, 0))
     for i in BMS.all_bars:
         i.get_lag_time(current_time)
-        i.display(dp)
+        i.display(DP)
     for i in BMS.sounds:
         i.get_lag_time(current_time)
         if i.lag_time < 0.0001 and not i.played and i.playable:
@@ -483,11 +482,10 @@ while True:
             i.get_lag_time(current_time)
             if i.lag_time < 0.0001 and not i.played:
                 current_bg = i
-                anime = current_bg.play(current_time)
-
+                current_image = current_bg.play(current_time)
         if current_bg and current_bg.video:
-            anime = current_bg.play(current_time)
-        screen.blit(anime, (text_x, 160))
+            current_image = current_bg.play(current_time)
+    # Play background sounds and keysounds,display notes, holds and BG.        
     combo_text = f.render("Combo:" + str(combo) + "/" + str(full_combo), True, 'white')
     screen.blit(combo_text, (text_x, 20))
     time_text = f.render("Time:" + str(int(current_time)), True, 'white')
@@ -495,9 +493,8 @@ while True:
     screen.blit(title, (text_x, 60))
     screen.blit(artist, (text_x, 80))
     screen.blit(sub_artist, (text_x, 100))
-    screen.blit(anime, (text_x, 120))
+    screen.blit(current_image, (text_x, 160))
     pygame.display.flip()
-    pygame.display.update()
     for event in pygame.event.get():
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
