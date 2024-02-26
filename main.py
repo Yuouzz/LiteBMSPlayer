@@ -5,6 +5,7 @@ import time
 import re
 import random
 import cv2
+from bisect import *
 
 WINDOW_WIDTH = 600
 
@@ -35,9 +36,8 @@ class bar_event:
         self.time = last_bar.time + 240 * last_bar.bar_length / last_bar.bpm * (self.bar - last_bar.bar)
         self.position = last_bar.position + (self.bar - last_bar.bar) * last_bar.bar_length
 
-    def get_time(self, bar):
-        _time = self.time + 240 * self.bar_length / self.bpm * (bar - self.bar)
-        return _time
+    def get_time(self, _bar_to_time):
+        self.time = _bar_to_time.to_time(self.bar)
 
     def get_position(self, bar):
         _position = self.position + self.bar_length * (bar - self.bar)
@@ -70,9 +70,9 @@ class sound:
         self.start_bar = start_bar
         self.sound_load()
 
-    def get_time(self, last_bar):
-        self.start_time = last_bar.get_time(self.start_bar)
-        self.start_position = last_bar.get_position(self.start_bar)
+    def get_time(self, _bar_to_time):
+        self.start_time = _bar_to_time.to_time(self.start_bar)
+        # self.start_position = last_bar.get_position(self.start_bar)
 
     def sound_load(self):
         if self.sound_file:
@@ -134,9 +134,9 @@ class hold(note):
         note.__init__(self, start_bar, sound_file, track)
         self.end_bar = end_bar
 
-    def get_end_time(self, last_bar):
-        self.end_time = last_bar.get_time(self.end_bar)
-        self.end_position = last_bar.get_position(self.end_bar)
+    def get_end_time(self, _bar_to_time):
+        self.end_time = _bar_to_time.to_time(self.end_bar)
+        # self.end_position = last_bar.get_position(self.end_bar)
         self.keep_time = self.end_time - self.start_time
         self.block = pygame.Surface((40, self.keep_time * FLOW_SPEED))
         self.block.fill(color=NOTE_COLOR[self.track])
@@ -175,8 +175,8 @@ class bg:
                 self.played_frames = 0
                 self.interval_time = 1 / int(self.cap.get(5))
 
-    def get_time(self, last_bar):
-        self.start_time = last_bar.get_time(self.start_bar)
+    def get_time(self, _bar_to_time):
+        self.start_time = _bar_to_time.to_time(self.start_bar)
         self.next_time = self.start_time
 
     def play(self, press_time=0.0):
@@ -202,6 +202,49 @@ class bg:
         return _time
 
 
+class time_event:
+    bar = 0.0
+    bpm = 0.0
+    bar_length = 1.0
+    time = 0.0
+    stop_time = 0.0
+
+    def __init__(self, bar, bpm=0.0, bar_length=1.0, stop_time=0.0):
+        self.bar = bar
+        self.bpm = bpm
+        self.bar_length = bar_length
+        self.stop_time = stop_time
+
+    def first_time(self, bar):
+        self.bar_length = bar.bar_length
+        pass
+
+    def self_time(self, last_bpm):
+        self.time = last_bpm.to_time(self.bar) + self.stop_time / 1000
+        if self.stop_time:
+            print(self.bar, self.stop_time)
+
+        if not self.bpm:
+            self.bpm = last_bpm.bpm
+        pass
+
+    def to_time(self, bar):
+        return self.time + 240 * self.bar_length / self.bpm * (bar - self.bar)
+
+
+class bar_to_time:
+
+    time_event = {}
+    time_list = []
+
+    def __init__(self, time_events, time_list):
+        self.time_event = time_events
+        self.time_list = time_list
+
+    def to_time(self, bar):
+        return self.time_event[self.time_list[bisect_left(self.time_list, bar) - 1]].to_time(bar)
+
+
 class BMSparser:
     file = ""
     path = ""
@@ -212,8 +255,8 @@ class BMSparser:
     holds = []
     bgs = []
     all_bars = []
-
-    bpm_list = []
+    time_events = {}
+    bar_to_time = None
 
     def __init__(self, file):
 
@@ -229,12 +272,15 @@ class BMSparser:
         except UnicodeDecodeError:
             _f = open(file, encoding='ansi')
             file_lines = _f.readlines()
+        _f.close()
 
         bars = {}
         max_bar = 0
 
         sound_define = {}
         bg_define = {}
+        bpm_define = {}
+        stop_define = {}
 
         if_state = False
         if_num = 0
@@ -248,154 +294,208 @@ class BMSparser:
 
         for line in file_lines:
             line = line.removesuffix("\n")
-            if re.match('#', line) and (if_state is False or if_num == random_num):
-                if re.match('#WAV', line):
-                    place = line[4:6]
-                    sound_define[place] = line[7:]
-                    pass
-                elif re.match('#BMP', line):
-                    place = line[4:6]
-                    bg_define[place] = line[7:]
-                    pass
-                elif re.match(r'#\d', line):
-                    channel = int(line[1:4])
-                    if channel > max_bar:
-                        max_bar = channel
-                    message = line[7:]
-                    length = len(message) // 2
-                    if line[4] == "0":
-                        if line[5] == "1":
-                            for _i in range(length):
-                                key = message[int(_i * 2): int(_i * 2 + 2)]
-                                if key != "00":
-                                    sound_file = ""
-                                    if key in sound_define:
-                                        sound_file = self.path + sound_define[key]
-                                    start_bar = int(channel) + _i / length
-                                    instance = sound(start_bar, sound_file)
-                                    self.sounds.append(instance)
-                                # Get background sounds
-                        elif line[5] == "2":
-                            if channel not in bars:
-                                bars[channel] = bar_event(int(channel), 0, float(line[7:]))
-                            else:
-                                bars[channel].bar_length = float(line[7:])
-                        elif line[5] == "3":
-                            if channel not in bars:
-                                bars[channel] = bar_event(int(channel), int(line[7:], 16), 1.0)
-                            else:
-                                bars[channel].bpm = int(line[7:], 16)
-                                # Get all BPM and beat variations.
-                        elif line[5] == "4":
-                            for _i in range(length):
-                                key = message[int(_i * 2): int(_i * 2 + 2)]
-                                if key != "00":
-                                    bg_file = ""
-                                    if key in bg_define:
-                                        bg_file = self.path + bg_define[key]
-                                    start_bar = int(channel) + _i / length
-                                    self.bgs.append(bg(bg_file, start_bar))
-                                # Get the start time of BGA or BGI.
-                    elif line[4] == "1" or line[4] == "2":
-                        track = 0
-                        if line[4] == "1":
-                            track = TRACK_DICT[line[5]]
-                        if line[4] == "2":
-                            track = TRACK_DICT_DP[line[5]]
-                        for _i in range(length):
-                            key = message[int(_i * 2): int(_i * 2 + 2)]
-                            if key != "00" and key in sound_define:
+            if re.match('#ENDIF', line):
+                if_state = False
+            elif not (if_state is False or if_num == random_num):
+                continue
+            elif re.match('#WAV', line):
+                place = line[4:6]
+                sound_define[place] = line[7:]
+                pass
+            elif re.match('#BMP', line):
+                place = line[4:6]
+                bg_define[place] = line[7:]
+                pass
+            elif re.match(r'#BPM\S', line):
+                place = line[4:6]
+                bpm_define[place] = line[7:]
+                pass
+            elif re.match('#STOP', line):
+                place = line[5:7]
+                stop_define[place] = line[8:]
+                pass
+            elif re.match(r'#\d', line):
+                channel = int(line[1:4])
+                if channel > max_bar:
+                    max_bar = channel
+                message = line[7:]
+                length = len(message) // 2
+                if line[4:6] == "01":
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00":
+                            sound_file = ""
+                            if key in sound_define:
                                 sound_file = self.path + sound_define[key]
-                                start_bar = int(channel) + _i / length
-                                instance = note(start_bar, sound_file, track)
-                                self.notes.append(instance)
-                                # Get all notes.
-                    elif line[4] == "5" or line[4] == "6":
-                        track = 0
-                        if line[4] == "5":
-                            track = TRACK_DICT[line[5]]
-                        if line[4] == "6":
-                            track = TRACK_DICT_DP[line[5]]
-                        for _i in range(length):
-                            key = message[int(_i * 2): int(_i * 2 + 2)]
-                            if key != "00":
-                                if hold_started[track]:
-                                    hold_end_bar = int(channel) + _i / length
-                                    instance = hold(hold_start_bar[track], hold_sound[track], track, hold_end_bar)
-                                    self.holds.append(instance)
-                                    hold_started[track] = False
-                                else:
-                                    hold_start_bar[track] = int(channel) + _i / length
-                                    hold_sound[track] = self.path + sound_define[key]
-                                    hold_started[track] = True
-                                    # Get all holds.
-                elif re.match('#IF', line):
-                    if_num = int(line[4:])
-                    if_state = True
-                elif re.match('#ENDIF', line):
-                    if_state = False
-                elif re.match('#RANDOM', line):
-                    random_num = random.randint(1, int(line[8:]))
-                elif re.match('#ENDRANDOM', line):
-                    random_num = 0
-
-                elif re.match('#PLAYER', line):
-                    self.info['player'] = line[8:]
-                elif re.match('#LNTYPE', line):
-                    self.info['ln_type'] = line[8:]
-                elif re.match('#BPM ', line):
-                    self.info['bpm'] = line[5:]
-                    if 0 not in bars:
-                        bars[0] = bar_event(0, int(float(line[5:])))
+                            start_bar = int(channel) + _i / length
+                            instance = sound(start_bar, sound_file)
+                            self.sounds.append(instance)
+                        # Get background sounds
+                elif line[4:6] == "02":
+                    if channel not in bars:
+                        bars[channel] = bar_event(int(channel), 0, float(line[7:]))
                     else:
-                        bars[0].bpm = int(line[5:])
-                elif re.match('#GENRE', line):
-                    self.info['genre'] = line[7:]
-                elif re.match('#TITLE', line):
-                    self.info['title'] = line[7:]
-                elif re.match('#ARTIST', line):
-                    self.info['artist'] = line[8:]
-                elif re.match('#TOTAL', line):
-                    self.info['total'] = line[7:]
+                        bars[channel].bar_length = float(line[7:])
+                elif line[4:6] == "03":
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00":
+                            _bpm = float(int(key, 16))
+                            _bar = int(channel) + _i / length
+                            if _bar not in self.time_events:
+                                self.time_events[_bar] = time_event(_bar, _bpm)
+                            else:
+                                self.time_events[_bar].bpm = _bpm
+                elif line[4:6] == "08":
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00" and key in bpm_define:
+                            _bpm = float(bpm_define[key])
+                            _bar = int(channel) + _i / length
+                            if _bar not in self.time_events:
+                                self.time_events[_bar] = time_event(_bar, _bpm)
+                            else:
+                                self.time_events[_bar].bpm = _bpm
+                elif line[4:6] == "09":
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00" and key in stop_define:
+                            stop_time = float(stop_define[key])
+                            _bar = int(channel) + _i / length
+                            if _bar not in self.time_events:
+                                self.time_events[_bar] = time_event(_bar, stop_time=stop_time)
+                            else:
+                                self.time_events[_bar].stop_time = stop_time
+                        # Get all BPM and beat variations.
+                elif line[4:6] == "04":
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00":
+                            bg_file = ""
+                            if key in bg_define:
+                                bg_file = self.path + bg_define[key]
+                            start_bar = int(channel) + _i / length
+                            self.bgs.append(bg(bg_file, start_bar))
+                elif line[4:6] == "07":
+                    # for _i in range(length):
+                    #     key = message[int(_i * 2): int(_i * 2 + 2)]
+                    #     if key != "00":
+                    #         bg_file = ""
+                    #         if key in bg_define:
+                    #             bg_file = self.path + bg_define[key]
+                    #         start_bar = int(channel) + _i / length
+                    #         self.bgs.append(bg(bg_file, start_bar))
+                    pass
+                    # Get the start time of BGA or BGI.
+                elif line[4] == "1" or line[4] == "2":
+                    track = 0
+                    if line[4] == "1":
+                        track = TRACK_DICT[line[5]]
+                    if line[4] == "2":
+                        track = TRACK_DICT_DP[line[5]]
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00" and key in sound_define:
+                            sound_file = self.path + sound_define[key]
+                            start_bar = int(channel) + _i / length
+                            instance = note(start_bar, sound_file, track)
+                            self.notes.append(instance)
+                            # Get all notes.
+                elif line[4] == "5" or line[4] == "6":
+                    track = 0
+                    if line[4] == "5":
+                        track = TRACK_DICT[line[5]]
+                    if line[4] == "6":
+                        track = TRACK_DICT_DP[line[5]]
+                    for _i in range(length):
+                        key = message[int(_i * 2): int(_i * 2 + 2)]
+                        if key != "00":
+                            if hold_started[track]:
+                                hold_end_bar = int(channel) + _i / length
+                                instance = hold(hold_start_bar[track], hold_sound[track], track, hold_end_bar)
+                                self.holds.append(instance)
+                                hold_started[track] = False
+                            else:
+                                hold_start_bar[track] = int(channel) + _i / length
+                                hold_sound[track] = self.path + sound_define[key]
+                                hold_started[track] = True
+                                # Get all holds.
+            elif re.match('#IF', line):
+                if_num = int(line[4:])
+                if_state = True
+            elif re.match('#ENDIF', line):
+                if_state = False
+            elif re.match('#RANDOM', line):
+                random_num = random.randint(1, int(line[8:]))
+            elif re.match('#ENDRANDOM', line):
+                random_num = 0
 
-                elif re.match('#PLAYLEVEL', line):
-                    self.info['play_level'] = line[11:]
-                elif re.match('#RANK', line):
-                    self.info['rank'] = line[6:]
-                elif re.match('#SUBTITLE', line):
-                    self.info['sub_title'] = line[10:]
-                elif re.match('#SUBARTIST', line):
-                    self.info['sub_artist'] = line[11:]
-                elif re.match('#BANNER', line):
-                    self.info['banner'] = line[8:]
-                elif re.match('#BACKBMP', line):
-                    self.info['back_bmp'] = line[9:]
-                elif re.match('#DIFFICULTY', line):
-                    self.info['difficulty'] = line[12:]
-            else:
-                if re.match('#ENDIF', line):
-                    if_state = False
-        _f.close()
+            elif re.match('#PLAYER', line):
+                self.info['player'] = line[8:]
+            elif re.match('#LNTYPE', line):
+                self.info['ln_type'] = line[8:]
+            elif re.match('#BPM ', line):
+                self.info['bpm'] = line[5:]
+                self.time_events[0.0] = time_event(0, float(line[5:]))
+            elif re.match('#GENRE', line):
+                self.info['genre'] = line[7:]
+            elif re.match('#TITLE', line):
+                self.info['title'] = line[7:]
+            elif re.match('#ARTIST', line):
+                self.info['artist'] = line[8:]
+            elif re.match('#TOTAL', line):
+                self.info['total'] = line[7:]
+
+            elif re.match('#PLAYLEVEL', line):
+                self.info['play_level'] = line[11:]
+            elif re.match('#RANK', line):
+                self.info['rank'] = line[6:]
+            elif re.match('#SUBTITLE', line):
+                self.info['sub_title'] = line[10:]
+            elif re.match('#SUBARTIST', line):
+                self.info['sub_artist'] = line[11:]
+            elif re.match('#BANNER', line):
+                self.info['banner'] = line[8:]
+            elif re.match('#BACKBMP', line):
+                self.info['back_bmp'] = line[9:]
+            elif re.match('#DIFFICULTY', line):
+                self.info['difficulty'] = line[12:]
+
         for _i in range(max_bar + 1):
             if _i not in bars:
                 bars[_i] = bar_event(_i)
-            if not bars[_i].bpm:
-                bars[_i].bpm = bars[_i - 1].bpm
-            if _i != 0:
-                bars[_i].self_time(bars[_i - 1])
-            if bars[_i].time > 0.0:
-                self.all_bars.append(bars[_i])
+            self.all_bars.append(bars[_i])
+            if _i not in self.time_events:
+                self.time_events[_i] = time_event(_i)
 
+        for _i in self.time_events:
+            self.time_events[_i].bar_length = bars[int(_i)].bar_length
+            # print(self.time_events[_i].bar, self.time_events[_i].bar_length)
+
+        # for _i in self.time_events:
+        #     print(self.time_events[_i].bar, self.time_events[_i].bpm)
+        time_list = sorted(list(self.time_events.keys()))
+        event_list = sorted(list(self.time_events.values()), key=lambda a: a.bar)
+        for _i in range(len(event_list)):
+            event_list[_i].bar_length = bars[int(event_list[_i].bar)].bar_length
+            if _i > 0:
+                event_list[_i].self_time(event_list[_i-1])
+            else:
+                pass
+
+        self.bar_to_time = bar_to_time(self.time_events, time_list.copy())
         for _i in self.sounds:
-            _i.get_time(bars[int(_i.start_bar)])
+            _i.get_time(self.bar_to_time)
         for _i in self.notes:
-            _i.get_time(bars[int(_i.start_bar)])
+            _i.get_time(self.bar_to_time)
         for _i in self.holds:
-            _i.get_time(bars[int(_i.start_bar)])
-            _i.get_end_time(bars[int(_i.end_bar)])
+            _i.get_time(self.bar_to_time)
+            _i.get_end_time(self.bar_to_time)
         for _i in self.bgs:
-            _i.get_time(bars[int(_i.start_bar)])
-        
+            _i.get_time(self.bar_to_time)
+        for _i in self.all_bars:
+            _i.get_time(self.bar_to_time)
+
     def total_notes(self):
         num = len(self.notes)
         return num
@@ -417,7 +517,7 @@ def try_get(dic, item):
 
 
 pygame.init()
-print("LiteBMxPlayer v0.1(github.com/Yuouzz/LiteBMxPlayer)\nPlease print BMS file path:")
+print("LiteBMxPlayer v0.2a(github.com/Yuouzz/LiteBMxPlayer)\nPlease print BMS file path:")
 path = input()
 BMS = BMSparser(path)
 DP = False
@@ -432,8 +532,8 @@ print("Enable BG?(Y/N)")
 choice = input()
 if choice.upper() == "Y":
     bg_available = True
-print("Press \'Esc\' to close the player.")  
-pygame.display.set_caption("LiteBMxPlayer v0.1")
+print("Tip：Press \'Esc\' to close the player.")
+pygame.display.set_caption("LiteBMxPlayer v0.2a")
 screen = pygame.display.set_mode((WINDOW_LENGTH, WINDOW_WIDTH))
 screen.fill(color='black')
 full_combo = BMS.total_notes() + BMS.total_holds() * 2
@@ -442,13 +542,13 @@ f = pygame.font.SysFont(['Consolas'], 15)
 title = f.render(try_get(BMS.info, 'title') + " " + try_get(BMS.info, 'sub_title'), True, 'white')
 artist = f.render(try_get(BMS.info, 'artist'), True, 'white')
 sub_artist = f.render(try_get(BMS.info, 'sub_artist'), True, 'white')
-# Get general information of BMS. 
+# Get general information of BMS.
 vertical_line = pygame.Surface((1, 600))
 vertical_line.fill(color='#202020')
 current_bg = None
 current_image = BLANK_IMAGE
 pygame.mixer.init()
-pygame.mixer.set_num_channels(150)
+pygame.mixer.set_num_channels(200)
 pygame.display.flip()
 zero_time = time.perf_counter()
 while True:
@@ -486,7 +586,7 @@ while True:
                 current_image = current_bg.play(current_time)
         if current_bg and current_bg.video:
             current_image = current_bg.play(current_time)
-    # Play background sounds and keysounds,display notes, holds and BG.        
+    # Play background sounds and keysounds,display notes, holds and BG.
     combo_text = f.render("Combo:" + str(combo) + "/" + str(full_combo), True, 'white')
     screen.blit(combo_text, (text_x, 20))
     time_text = f.render("Time:" + str(int(current_time)), True, 'white')
